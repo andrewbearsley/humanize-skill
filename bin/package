@@ -1,0 +1,45 @@
+#!/bin/bash
+# Build dist/humanize.zip for upload in claude.ai Settings > Skills.
+#
+# The zip holds the folder humanize/ with SKILL.md. SKILL.md gets a commit stamp
+# in metadata (source and commit), so you can tell when the claude.ai copy is
+# older than the repo. The script also prints the stamp on the synced copy.
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+NAME=humanize
+OUT="$ROOT/dist"
+
+if [[ -n $(git -C "$ROOT" status --porcelain -- SKILL.md references 2>/dev/null) ]]; then
+  echo "uncommitted changes to the skill, commit first so the stamp is true" >&2
+  exit 1
+fi
+commit=$(git -C "$ROOT" log -1 --format=%h -- SKILL.md)
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/$NAME" "$OUT"
+cp "$ROOT/SKILL.md" "$tmp/$NAME/"
+[[ -d $ROOT/references ]] && cp -R "$ROOT/references" "$tmp/$NAME/"
+
+python3 - "$tmp/$NAME/SKILL.md" "$commit" <<'PY'
+import re, sys
+path, commit = sys.argv[1:]
+text = open(path).read()
+m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+if not m:
+    sys.exit(f"{path}: no frontmatter")
+if re.search(r"^metadata:", m.group(1), re.MULTILINE):
+    sys.exit(f"{path}: already has metadata; add the stamp by hand")
+fm = m.group(1) + f"\nmetadata:\n  source: humanize-skill\n  commit: '{commit}'"
+open(path, "w").write(f"---\n{fm}\n---\n" + text[m.end():])
+PY
+
+rm -f "$OUT/$NAME.zip"
+(cd "$tmp" && zip -qr "$OUT/$NAME.zip" "$NAME" -x '*.DS_Store')
+echo "$OUT/$NAME.zip  (humanize-skill@$commit)"
+
+synced=$(compgen -G "$HOME/.claude/skills/synced/*/$NAME/SKILL.md" | head -1 || true)
+if [[ -n $synced ]]; then
+  have=$(sed -n "s/^  commit: '\{0,1\}\([0-9a-f]*\)'\{0,1\}$/\1/p" "$synced" | head -1)
+  echo "claude.ai copy: ${have:-unstamped}"
+fi

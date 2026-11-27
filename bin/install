@@ -1,0 +1,31 @@
+#!/bin/bash
+# Link this repo into the agent runtimes on this machine as the skill "humanize".
+#
+#   bin/install            ~/.agents/skills (Codex, Copilot, Gemini) and ~/.claude/skills
+#
+# Links, not copies, so the repo stays the single source of the skill text.
+# Where the Claude app has synced the claude.ai copy into ~/.claude/skills/synced,
+# Claude Code loads that copy as anthropic-skills:humanize. A link there would
+# load the skill twice, so the Claude Code link is skipped.
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+NAME=humanize
+
+targets=("$HOME/.agents/skills")
+[[ -d $HOME/.claude ]] && targets+=("$HOME/.claude/skills")
+
+for dir in "${targets[@]}"; do
+  mkdir -p "$dir"
+  dest="$dir/$NAME"
+  if [[ $dir == "$HOME/.claude/skills" ]] && compgen -G "$dir/synced/*/$NAME/SKILL.md" >/dev/null; then
+    [[ -L $dest ]] && rm "$dest" && echo "unlinked $dest"
+    echo "skip $dest: Claude Code loads the claude.ai copy (anthropic-skills:$NAME)"
+    continue
+  fi
+  if [[ -e $dest && ! -L $dest ]]; then
+    echo "skip $dest: a real folder is already there, move it aside first" >&2
+    continue
+  fi
+  ln -sfn "$ROOT" "$dest"
+  echo "$dest -> $ROOT"
+done
